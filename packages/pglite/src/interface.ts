@@ -20,10 +20,19 @@ export interface ExecProtocolOptions {
   syncToFs?: boolean;
 }
 
-export interface Extension<T = any> {
-  name: string;
-  setup: (mod: any, pg: PGliteInterface) => T;
-  init: () => void;
+export interface ExtensionSetupResult {
+  emscriptenOpts?: any;
+  namespaceObj?: any;
+  init?: () => Promise<void>;
+  close?: () => Promise<void>;
+}
+
+export interface Extension {
+  name?: string;
+  setup: (
+    pg: PGliteInterface,
+    emscriptenOpts: any,
+  ) => Promise<ExtensionSetupResult>;
 }
 
 export type Extensions = {
@@ -48,35 +57,39 @@ export type PGliteInterface = {
   query<T>(
     query: string,
     params?: any[],
-    options?: QueryOptions
+    options?: QueryOptions,
   ): Promise<Results<T>>;
   exec(query: string, options?: QueryOptions): Promise<Array<Results>>;
   transaction<T>(
-    callback: (tx: Transaction) => Promise<T>
+    callback: (tx: Transaction) => Promise<T>,
   ): Promise<T | undefined>;
   execProtocol(
     message: Uint8Array,
-    options?: ExecProtocolOptions
+    options?: ExecProtocolOptions,
   ): Promise<Array<[BackendMessage, Uint8Array]>>;
   listen(
     channel: string,
-    callback: (payload: string) => void
+    callback: (payload: string) => void,
   ): Promise<() => Promise<void>>;
   unlisten(
     channel: string,
-    callback?: (payload: string) => void
+    callback?: (payload: string) => void,
   ): Promise<void>;
   onNotification(
-    callback: (channel: string, payload: string) => void
+    callback: (channel: string, payload: string) => void,
   ): () => void;
   offNotification(callback: (channel: string, payload: string) => void): void;
 };
 
 export type PGliteInterfaceExtensions<E> = E extends Extensions
   ? {
-      [K in keyof E]: ReturnType<E[K]["setup"]> extends undefined | null | void
-        ? never
-        : ReturnType<E[K]["setup"]>;
+      [K in keyof E]: Awaited<
+        ReturnType<E[K]["setup"]>
+      >["namespaceObj"] extends infer N
+        ? N extends undefined | null | void
+          ? never
+          : N
+        : never;
     }
   : {};
 
@@ -92,7 +105,7 @@ export interface Transaction {
   query<T>(
     query: string,
     params?: any[],
-    options?: QueryOptions
+    options?: QueryOptions,
   ): Promise<Results<T>>;
   exec(query: string, options?: QueryOptions): Promise<Array<Results>>;
   rollback(): Promise<void>;
