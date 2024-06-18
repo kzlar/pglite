@@ -8,12 +8,12 @@ import { serializeType } from "./types.js";
 import type {
   DebugLevel,
   PGliteOptions,
-  FilesystemType,
   PGliteInterface,
   Results,
   Transaction,
   QueryOptions,
   ExecProtocolOptions,
+  PGliteInterfaceExtensions,
 } from "./interface.js";
 
 // Importing the source as the built version is not ESM compatible
@@ -28,9 +28,7 @@ import {
 } from "pg-protocol/dist/messages.js";
 
 export class PGlite implements PGliteInterface {
-  readonly dataDir?: string;
-  readonly fsType: FilesystemType;
-  protected fs?: Filesystem;
+  fs?: Filesystem;
   protected emp?: any;
 
   #initStarted = false;
@@ -67,10 +65,26 @@ export class PGlite implements PGliteInterface {
    *                Use memory:// to use in-memory filesystem
    * @param options Optional options
    */
-  constructor(dataDir?: string, options?: PGliteOptions) {
-    const { dataDir: dir, fsType } = parseDataDir(dataDir);
-    this.dataDir = dir;
-    this.fsType = fsType;
+  constructor(dataDir?: string, options?: PGliteOptions);
+
+  /**
+   * Create a new PGlite instance
+   * @param options PGlite options including the data directory
+   */
+  constructor(options?: PGliteOptions);
+
+  constructor(
+    dataDirOrPGliteOptions: string | PGliteOptions = {},
+    options: PGliteOptions = {}
+  ) {
+    if (typeof dataDirOrPGliteOptions === "string") {
+      options = {
+        dataDir: dataDirOrPGliteOptions,
+        ...options,
+      };
+    } else {
+      options = dataDirOrPGliteOptions;
+    }
 
     // Enable debug logging if requested
     if (options?.debug !== undefined) {
@@ -91,14 +105,21 @@ export class PGlite implements PGliteInterface {
     });
 
     // Initialize the database, and store the promise so we can wait for it to be ready
-    this.waitReady = this.#init();
+    this.waitReady = this.#init(options ?? {});
   }
 
   /**
    * Initialize the database
    * @returns A promise that resolves when the database is ready
    */
-  async #init() {
+  async #init(options: PGliteOptions) {
+    if (options.fs) {
+      this.fs = options.fs;
+    } else {
+      const { dataDir, fsType } = parseDataDir(options.dataDir);
+      this.fs = await loadFs(dataDir, fsType);
+    }
+
     let firstRun = false;
     await new Promise<void>(async (resolve, reject) => {
       if (this.#initStarted) {
@@ -106,13 +127,10 @@ export class PGlite implements PGliteInterface {
       }
       this.#initStarted = true;
 
-      // Load a filesystem based on the type
-      this.fs = await loadFs(this.dataDir, this.fsType);
-
       // Initialize the filesystem
       // returns true if this is the first run, we then need to perform
       // additional setup steps at the end of the init.
-      firstRun = await this.fs.init(this.debug);
+      firstRun = await this.fs!.init(this.debug);
 
       let emscriptenOpts: Partial<EmPostgres> = {
         arguments: [
@@ -145,7 +163,7 @@ export class PGlite implements PGliteInterface {
         Event: PGEvent,
       };
 
-      emscriptenOpts = await this.fs.emscriptenOpts(emscriptenOpts);
+      emscriptenOpts = await this.fs!.emscriptenOpts(emscriptenOpts);
       const emp = await EmPostgresFactory(emscriptenOpts);
       this.emp = emp;
     });
@@ -234,7 +252,7 @@ export class PGlite implements PGliteInterface {
   async query<T>(
     query: string,
     params?: any[],
-    options?: QueryOptions,
+    options?: QueryOptions
   ): Promise<Results<T>> {
     await this.#checkReady();
     // We wrap the public query method in the transaction mutex to ensure that
@@ -271,7 +289,7 @@ export class PGlite implements PGliteInterface {
   async #runQuery<T>(
     query: string,
     params?: any[],
-    options?: QueryOptions,
+    options?: QueryOptions
   ): Promise<Results<T>> {
     return await this.#queryMutex.runExclusive(async () => {
       // We need to parse, bind and execute a query with parameters
@@ -286,15 +304,15 @@ export class PGlite implements PGliteInterface {
             serialize.parse({
               text: query,
               types: parsedParams.map(([, type]) => type),
-            }),
+            })
           )),
           ...(await this.#execProtocolNoSync(
             serialize.bind({
               values: parsedParams.map(([val]) => val),
-            }),
+            })
           )),
           ...(await this.#execProtocolNoSync(
-            serialize.describe({ type: "P" }),
+            serialize.describe({ type: "P" })
           )),
           ...(await this.#execProtocolNoSync(serialize.execute({}))),
         ];
@@ -306,7 +324,7 @@ export class PGlite implements PGliteInterface {
       }
       return parseResults(
         results.map(([msg]) => msg),
-        options,
+        options
       )[0] as Results<T>;
     });
   }
@@ -320,7 +338,7 @@ export class PGlite implements PGliteInterface {
    */
   async #runExec(
     query: string,
-    options?: QueryOptions,
+    options?: QueryOptions
   ): Promise<Array<Results>> {
     return await this.#queryMutex.runExclusive(async () => {
       // No params so we can just send the query
@@ -338,7 +356,7 @@ export class PGlite implements PGliteInterface {
       }
       return parseResults(
         results.map(([msg]) => msg),
-        options,
+        options
       ) as Array<Results>;
     });
   }
@@ -349,7 +367,7 @@ export class PGlite implements PGliteInterface {
    * @returns The result of the transaction
    */
   async transaction<T>(
-    callback: (tx: Transaction) => Promise<T>,
+    callback: (tx: Transaction) => Promise<T>
   ): Promise<T | undefined> {
     await this.#checkReady();
     return await this.#transactionMutex.runExclusive(async () => {
@@ -368,7 +386,7 @@ export class PGlite implements PGliteInterface {
           query: async (
             query: string,
             params?: any[],
-            options?: QueryOptions,
+            options?: QueryOptions
           ) => {
             checkClosed();
             return await this.#runQuery(query, params, options);
@@ -427,7 +445,7 @@ export class PGlite implements PGliteInterface {
    */
   async execProtocol(
     message: Uint8Array,
-    { syncToFs = true }: ExecProtocolOptions = {},
+    { syncToFs = true }: ExecProtocolOptions = {}
   ): Promise<Array<[BackendMessage, Uint8Array]>> {
     return await this.#executeMutex.runExclusive(async () => {
       if (this.#resultAccumulator.length > 0) {
@@ -490,7 +508,7 @@ export class PGlite implements PGliteInterface {
   }
 
   async #execProtocolNoSync(
-    message: Uint8Array,
+    message: Uint8Array
   ): Promise<Array<[BackendMessage, Uint8Array]>> {
     return await this.execProtocol(message, { syncToFs: false });
   }
@@ -557,7 +575,7 @@ export class PGlite implements PGliteInterface {
    * @param callback The callback to call when a notification is received
    */
   onNotification(
-    callback: (channel: string, payload: string) => void,
+    callback: (channel: string, payload: string) => void
   ): () => void {
     this.#globalNotifyListeners.add(callback);
     return () => {
@@ -571,5 +589,21 @@ export class PGlite implements PGliteInterface {
    */
   offNotification(callback: (channel: string, payload: string) => void) {
     this.#globalNotifyListeners.delete(callback);
+  }
+
+  /**
+   * Create a new PGlite instance with extensions on the interface
+   * (The main constructor does enable extensions, but does not add them to the interface)
+   * @param dataDir The directory to store the database files
+   *                Prefix with idb:// to use indexeddb filesystem in the browser
+   *                Use memory:// to use in-memory filesystem
+   * @param options Optional options
+   * @returns A new PGlite instance with extensions
+   */
+  static withExtensions<O extends PGliteOptions>(
+    dataDir?: string,
+    options?: O
+  ): PGlite & PGliteInterfaceExtensions<O["extensions"]> {
+    return new PGlite(dataDir, options) as any;
   }
 }
