@@ -27,12 +27,14 @@ export interface ExtensionSetupResult {
   close?: () => Promise<void>;
 }
 
+export type ExtensionSetup = (
+  pg: PGliteInterface,
+  emscriptenOpts: any,
+) => Promise<ExtensionSetupResult>;
+
 export interface Extension {
   name?: string;
-  setup: (
-    pg: PGliteInterface,
-    emscriptenOpts: any,
-  ) => Promise<ExtensionSetupResult>;
+  setup: ExtensionSetup;
 }
 
 export type Extensions = {
