@@ -1,5 +1,5 @@
 <button id="start">start</button><button id="add">Add</button>
-<pre id="output"></pre>
+<div id="output"></div>
 <script type="module">
   import { PGlite } from "../dist/index.js";
   import { live } from "../dist/live/index.js";
@@ -7,9 +7,9 @@
   const output = document.getElementById("output");
   const startBtn = document.getElementById("start");
   const addBtn = document.getElementById("add");
-  let counter = 10;
+  let counter = 1000;
   let lastClicked = 0;
-  const nameLength = 100000;
+  const nameLength = 10000;
   const nameSuffix = "-".repeat(nameLength);
 
   const pg = new PGlite({
@@ -39,7 +39,7 @@
       (res) => {
         const time = performance.now() - lastClicked;
         console.log(`Update took ${time}ms`);
-        output.textContent = JSON.stringify(res.rows, null, 2);
+        output.textContent = res.rows.map((row) => row.id).join(", ");
       }
     );
   });
