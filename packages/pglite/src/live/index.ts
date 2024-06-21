@@ -1,9 +1,4 @@
-import type {
-  Extension,
-  ExtensionSetup,
-  PGliteInterface,
-  Results,
-} from "../interface";
+import type { Extension, PGliteInterface, Results } from "../interface";
 
 let liveQueryCounter = 0;
 
@@ -18,7 +13,7 @@ interface liveNamespace {
   query<T>(
     query: string,
     params?: any[],
-    callback?: (results: Results<T>) => void
+    callback?: (results: Results<T>) => void,
   ): Promise<queryReturn<T>>;
 }
 
@@ -28,26 +23,23 @@ interface queryReturn<T> {
   refresh: () => Promise<void>;
 }
 
-const setup: ExtensionSetup = async (
-  pg: PGliteInterface,
-  emscriptenOpts: any
-) => {
+const setup = async (pg: PGliteInterface, emscriptenOpts: any) => {
   const namespaceObj: liveNamespace = {
     async query<T>(
       query: string,
       params: any[] | undefined | null,
-      callback: (results: Results<T>) => void
+      callback: (results: Results<T>) => void,
     ) {
       const id = liveQueryCounter++;
 
       let results: Results<T>;
-      let tables: { table_name: string; schema_name: string; }[];
+      let tables: { table_name: string; schema_name: string }[];
 
       await pg.transaction(async (tx) => {
         // Create a temporary view with the query
         await tx.query(
           `CREATE OR REPLACE TEMP VIEW live_query_${id}_view AS ${query}`,
-          params ?? []
+          params ?? [],
         );
 
         // Inspect which tables are used in the query
@@ -70,13 +62,14 @@ const setup: ExtensionSetup = async (
               )
               AND d.deptype = 'n';
         `,
-            [`live_query_${id}_view`]
+            [`live_query_${id}_view`],
           )
         ).rows.filter((row) => row.table_name !== `live_query_${id}_view`);
 
         // Setup notification triggers for the tables
-        const triggers = tables.map((table) => {
-          return `
+        const triggers = tables
+          .map((table) => {
+            return `
             CREATE OR REPLACE FUNCTION _notify_${table.schema_name}_${table.table_name}() RETURNS TRIGGER AS $$
             BEGIN
               PERFORM pg_notify('table_change__${table.schema_name}__${table.table_name}', '');
@@ -87,12 +80,13 @@ const setup: ExtensionSetup = async (
             AFTER INSERT OR UPDATE OR DELETE ON ${table.schema_name}.${table.table_name}
             FOR EACH STATEMENT EXECUTE FUNCTION _notify_${table.schema_name}_${table.table_name}();
           `;
-        }).join("\n");
+          })
+          .join("\n");
         tx.exec(triggers);
 
         // Channel names to listen to
         const channels = tables.map(
-          (table) => `table_change__${table.schema_name}__${table.table_name}`
+          (table) => `table_change__${table.schema_name}__${table.table_name}`,
         );
 
         // Get the initial results
@@ -101,9 +95,7 @@ const setup: ExtensionSetup = async (
 
       // Function to refresh the query
       const refresh = async () => {
-        results = await pg.query<T>(
-          `SELECT * FROM live_query_${id}_view`
-        );
+        results = await pg.query<T>(`SELECT * FROM live_query_${id}_view`);
         callback(results);
       };
 
@@ -114,7 +106,7 @@ const setup: ExtensionSetup = async (
           `table_change__${table.schema_name}__${table.table_name}`,
           async () => {
             refresh();
-          }
+          },
         );
         unsubList.push(unsub);
       }
@@ -135,13 +127,11 @@ const setup: ExtensionSetup = async (
         initialResults: results!,
         unsubscribe,
         refresh,
-      }
+      };
     },
   };
 
   return {
-    // init: async () => {},
-    // close: async () => {},
     namespaceObj,
   };
 };
