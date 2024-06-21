@@ -22,7 +22,7 @@
   await pg.exec(`
     CREATE TABLE IF NOT EXISTS test (
       id SERIAL PRIMARY KEY,
-      rand FLOAT,
+      rand float,
       name TEXT
     );
     INSERT INTO test (name, rand)
@@ -32,18 +32,23 @@
 
   startBtn.addEventListener("click", async () => {
     lastClicked = performance.now();
-    pg.live.query("SELECT * FROM test ORDER BY rand;", null, (res) => {
-      const time = performance.now() - lastClicked;
-      console.log(`Update took ${time}ms`);
-      output.textContent = JSON.stringify(res.rows, null, 2);
-    });
+    pg.live.changes(
+      "SELECT * FROM test ORDER BY rand;",
+      null,
+      "id",
+      (changes) => {
+        const time = performance.now() - lastClicked;
+        console.log(`Update took ${time}ms`);
+        output.textContent = JSON.stringify(changes, null, 2);
+      }
+    );
   });
 
   addBtn.addEventListener("click", async () => {
     lastClicked = performance.now();
     await pg.query(
       "INSERT INTO test (name, rand) VALUES ($1, random());",
-      [`test${++counter}{$nameSuffix}`]
+      [`test${++counter}${nameSuffix}`]
     );
   });
 </script>
