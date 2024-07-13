@@ -215,6 +215,26 @@ then
     python3 cibuild/pack_extension.py
 fi
 
+if echo "$*"|grep -q pg_stat_statements
+then
+    echo "================================================="
+    # cd "postgresql-$PGVERSION"
+    pushd build/postgres/contrib/pg_stat_statements/
+        PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install
+    popd
+    python3 cibuild/pack_extension.py
+fi
+
+if echo "$*"|grep -q pg_trgm
+then
+    echo "================================================="
+    # cd "postgresql-$PGVERSION"
+    pushd build/postgres/contrib/pg_trgm/
+        PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install
+    popd
+    python3 cibuild/pack_extension.py
+fi
+
 
 # ===========================================================================
 # ===========================================================================
